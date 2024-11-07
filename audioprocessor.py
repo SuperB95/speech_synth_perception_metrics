@@ -195,47 +195,6 @@ class AudioProcessor:
 
         return audio_data
 
-    # @staticmethod
-    # def create_dataset(base_dir='media/voice_samples', split_ratios=(0.7, 0.15, 0.15), target_sr=22050, n_melspec=80, h5_file='mel_dataset.h5'):
-    #     with h5py.File(h5_file, 'w') as h5f:
-    #         train_group = h5f.create_group("train")
-    #         val_group = h5f.create_group("validation")
-    #         test_group = h5f.create_group("test")
-    #
-    #         # Traverse female and male folders
-    #         for gender in ['female', 'male']:
-    #             gender_path = os.path.join(base_dir, gender)
-    #
-    #             for subject in os.listdir(gender_path):
-    #                 subject_path = os.path.join(gender_path, subject)
-    #                 if not os.path.isdir(subject_path):
-    #                     continue
-    #
-    #                 # List all audio files for the subject
-    #                 audio_files = [os.path.join(subject_path, f) for f in os.listdir(subject_path) if f.endswith('.wav')]
-    #                 n_samples = len(audio_files)
-    #
-    #                 # Calculate sizes for splits
-    #                 train_size = int(n_samples * split_ratios[0])
-    #                 val_size = int(n_samples * split_ratios[1])
-    #
-    #                 # Split files into training, validation, and testing
-    #                 train_files = audio_files[:train_size]
-    #                 val_files = audio_files[train_size:train_size + val_size]
-    #                 test_files = audio_files[train_size + val_size:]
-    #
-    #                 # Process and save each split
-    #                 AudioProcessor._process_split(train_files, train_group, gender, subject)
-    #                 AudioProcessor._process_split(val_files, val_group, gender, subject)
-    #                 AudioProcessor._process_split(test_files, test_group, gender, subject)
-    #
-    # @staticmethod
-    # def _process_split(files, group, gender, subject):
-    #     for i, file_path in enumerate(files):
-    #         mel_data = AudioProcessor.wav_to_mel(file_path)
-    #         dset = group.create_dataset(f"{gender}/{subject}/mel_{i}", data=mel_data)
-    #         dset.attrs['gender'] = gender
-    #         dset.attrs['subject'] = subject
 
     @staticmethod
     def plot_mel_spectrogram(mel_data, sr=22050, hop_length=256, save_path=None):
