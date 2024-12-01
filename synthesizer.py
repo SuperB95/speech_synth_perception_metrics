@@ -1,0 +1,140 @@
+import torch
+import numpy as np
+import soundfile as sf
+import h5py
+from torch.utils.data import DataLoader
+import torch.nn.functional as F
+from meldataset import MelDataset
+import h5py
+import torch
+from torch.utils.data import DataLoader, Dataset
+import numpy as np
+
+
+class Synthesizer:
+
+    def __init__(self, waveglow_path, target_sr=22050):
+        self.target_sr = target_sr
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # Load the WaveGlow model
+        self.waveglow = torch.load(waveglow_path, map_location=self.device)['model']
+        self.waveglow = self.waveglow.to(self.device).eval()
+
+    def synthesize_from_mel(self, mel_data, output_path):
+        # Convert mel spectrogram to tensor and move to GPU if available
+        mel_data = torch.tensor(mel_data).unsqueeze(0).to(self.device)
+
+        # Generate audio with WaveGlow
+        with torch.no_grad():
+            audio = self.waveglow.infer(mel_data, sigma=0.666)
+
+        # Convert audio tensor to numpy and save as a .wav file
+        audio = audio[0].cpu().numpy()
+        sf.write(output_path, audio, self.target_sr)
+        print(f"Audio saved to {output_path}")
+
+    def synthesize_from_h5(self, h5_file, split="test", num_samples=5, output_dir="output"):
+        with h5py.File(h5_file, 'r') as h5f:
+            split_group = h5f[split]
+
+            # Iterate through the selected number of samples in the split
+            for idx, sample_key in enumerate(split_group):
+                if idx >= num_samples:
+                    break
+                mel_data = split_group[sample_key][()]
+
+                # Define the output path for each synthesized sample
+                output_path = f"{output_dir}/{split}_sample_{idx + 1}.wav"
+                self.synthesize_from_mel(mel_data, output_path)
+
+    def train_model(self, num_epochs=50):
+        self.waveglow.train()
+
+        train_dataset = MelDataset('mel_dataset.h5')
+        train_loader = DataLoader(train_dataset, batch_size=35, shuffle=True, collate_fn=Synthesizer.collate_fn)
+
+        optimizer = torch.optim.Adam(self.waveglow.parameters(), lr=1e-4)
+
+        for epoch in range(num_epochs):
+            print("train loader: \n", train_loader)
+            for pair in train_loader:
+
+                print("melspec :\n", pair[0].shape)
+                print("melspec :\n", pair[1].shape)
+                mel = pair[0].to(self.device)
+
+                # Flatten mel spectrogram to 2D if needed (combine frequency and time dimensions)
+                mel = mel.view(mel.size(0), -1)  # Reshape to (batch_size, mel_spec_dim)
+
+
+                # Get the corresponding audio for each mel spectrogram
+                audio = pair[1]
+
+                # Forward pass: Predict audio from mel spectrogram
+                predicted_audio = self.waveglow(mel)
+
+                # Compute the loss
+                loss = Synthesizer.compute_loss(predicted_audio, audio)
+
+                # Backpropagation and optimization
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+            print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {loss.item()}")
+
+        # Save the trained model
+        torch.save({'model': self.waveglow.state_dict()}, 'fine_tuned_waveglow.pt')
+
+    import torch
+    import torch.nn.functional as F
+
+    @staticmethod
+    def collate_fn(batch):
+        mel_list = []
+        audio_list = []
+
+        # Filter out any items in the batch that do not have the expected structure
+        batch = [(mel, audio) for mel, audio in batch if mel is not None and audio is not None]
+
+        # Check if batch is empty after filtering
+        if len(batch) == 0:
+            print("empty batch")
+            return None, None
+
+        # Find max mel spectrogram and audio lengths
+        max_mel_len = max(mel.shape[1] for mel, _ in batch)  # Get the max width dimension of mel spectrograms
+        max_audio_len = max(audio.shape[0] for _, audio in batch)  # Get the max length of audio waveforms
+
+        for mel, audio in batch:
+            # Pad mel spectrograms
+            mel_padded = F.pad(mel, (0, max_mel_len - mel.shape[1]), mode='constant', value=0)
+            mel_list.append(mel_padded)
+
+            # Pad audio waveforms
+            audio_padded = F.pad(audio, (0, max_audio_len - audio.shape[0]), mode='constant', value=0)
+            audio_list.append(audio_padded)
+
+        # Stack padded tensors into a batch
+        mel_batch = torch.stack(mel_list) if mel_list else None
+        audio_batch = torch.stack(audio_list) if audio_list else None
+
+        return mel_batch, audio_batch
+
+    # Define a basic MSE loss function
+    @staticmethod
+    def compute_loss(predicted_audio, target_audio):
+        """
+        Computes the Mean Squared Error (MSE) loss between the predicted audio
+        and the target (original) audio.
+
+        Parameters:
+        - predicted_audio: Tensor, the audio waveform generated by WaveGlow
+        - target_audio: Tensor, the ground truth audio waveform
+
+        Returns:
+        - loss: The computed MSE loss
+        """
+        mse_loss = torch.nn.MSELoss()
+        return mse_loss(predicted_audio, target_audio)
